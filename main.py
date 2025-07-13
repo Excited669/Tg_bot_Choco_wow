@@ -3,42 +3,51 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import BOT_TOKEN # Убедитесь, что BOT_TOKEN определен в config.py
-from database.database import Database # Импортируем КЛАСС Database
+from config import BOT_TOKEN, ADMIN_IDS
+from database.database import Database
 from handlers import user_handlers, admin_handlers
+from utils.set_bot_commands import set_admin_commands
 
 # Настройка логирования для всего приложения
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 async def main():
-    # 1. Инициализация базы данных: создаем экземпляр и настраиваем таблицы
-    db_instance = Database() # Создаем объект базы данных
-    await db_instance.connect() # Устанавливаем соединение с БД
-    await db_instance.setup_database() # Создаем таблицы, если их нет
-    logging.info("База данных инициализирована: таблица 'participants' проверена/создана.")
+    # 1. Инициализация хранилища для FSM
+    storage = MemoryStorage()
 
-    # 2. Инициализация бота и диспетчера
+    # 2. Инициализация базы данных
+    db_instance = Database()
+    await db_instance.connect()
+    await db_instance.setup_database()
+    logger.info("База данных инициализирована.")
+
+    # 3. Инициализация бота и диспетчера
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode="HTML")
     )
-    dp = Dispatcher()
+    dp = Dispatcher(storage=storage)
 
-    # 3. Регистрация роутеров
+    # 4. Регистрация роутеров
     dp.include_router(user_handlers.router)
     dp.include_router(admin_handlers.router)
 
-    # 4. Запуск бота
+    # 5. Установка команд для админов
+    await set_admin_commands(bot, ADMIN_IDS)
+    logger.info("Команды для администраторов установлены.")
+
+    # 6. Запуск бота
     try:
-        logging.info("Запускаем опрос бота %s", await bot.get_me())
-        # Самое важное: передаем объект db_instance в контекст диспетчера.
-        # Теперь он будет доступен в хендлерах как аргумент с тем же именем.
+        logger.info("Запускаем опрос бота %s", await bot.get_me())
+        # Передаем объект db_instance в контекст диспетчера
         await dp.start_polling(bot, db_instance=db_instance)
     finally:
-        # Убедимся, что соединение с сессией бота и с базой данных закрываются
         await bot.session.close()
-        await db_instance.close() # Закрываем соединение с базой данных при завершении работы
+        await db_instance.close()
+        logger.info("Работа бота и соединение с БД завершены.")
 
 if __name__ == "__main__":
     asyncio.run(main())

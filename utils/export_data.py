@@ -1,86 +1,76 @@
-# utils/export_data.py
-
 import csv
 import io
 import asyncio
-from datetime import datetime
-from aiogram import Bot  # Импортируем Bot для получения информации о файлах
+import json
+from aiogram import Bot
 
-# Базовый URL для скачивания файлов Telegram.
-# BOT_TOKEN будет добавлен динамически в функции.
 TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file/bot"
 
 
 async def generate_participants_csv(
         column_names: list[str],
         data: list[tuple],
-        bot: Bot  # Добавляем аргумент bot
+        bot: Bot
 ) -> io.BytesIO:
-    """
-    Генерирует CSV-файл из предоставленных данных, заменяя ID фото на URL-ссылки,
-    и возвращает его в виде BytesIO объекта.
-    Эта операция выполняется в отдельном потоке, чтобы не блокировать основной асинхронный цикл.
-    """
-
     bot_token = bot.token
     telegram_file_url_prefix = f"{TELEGRAM_FILE_BASE_URL}{bot_token}/"
 
-    # Подготавливаем данные: заменяем ID фото на их URL
     processed_data = []
-    # Определяем индексы для фотоколонок, чтобы знать, какие данные заменять
-    collection_photo_idx = -1
-    receipt_photo_idx = -1
+
+    # Get indexes of file columns
     try:
-        collection_photo_idx = column_names.index("collection_photo_id")
-    except ValueError:
-        pass
-    try:
-        receipt_photo_idx = column_names.index("receipt_photo_id")
-    except ValueError:
-        pass
+        collection_idx = column_names.index("collection_photo_ids")
+        receipt_idx = column_names.index("receipt_file_ids")
+    except ValueError as e:
+        print(f"Error finding column index: {e}")
+        return io.BytesIO()  # Return empty if columns not found
 
     for row_tuple in data:
-        row_list = list(row_tuple)  # Копируем в список для изменения
+        row_list = list(row_tuple)
 
-        # Получаем file_path и формируем URL для фото коллекции
-        if collection_photo_idx != -1 and row_list[collection_photo_idx]:
-            file_id = row_list[collection_photo_idx]
+        # Process collection photos
+        if row_list[collection_idx]:
             try:
-                file_info = await bot.get_file(file_id)
-                row_list[collection_photo_idx] = f"{telegram_file_url_prefix}{file_info.file_path}"
-            except Exception:
-                row_list[collection_photo_idx] = f"Не удалось получить ссылку: {file_id}"  # Обработка ошибок
+                file_ids = json.loads(row_list[collection_idx])
+                urls = []
+                for file_id in file_ids:
+                    try:
+                        file_info = await bot.get_file(file_id)
+                        urls.append(f"{telegram_file_url_prefix}{file_info.file_path}")
+                    except Exception:
+                        urls.append(f"Invalid_file_id: {file_id}")
+                row_list[collection_idx] = "\n".join(urls)  # Join URLs with newline
+            except (json.JSONDecodeError, TypeError):
+                row_list[collection_idx] = "Invalid JSON data"
 
-        # Получаем file_path и формируем URL для фото чека
-        if receipt_photo_idx != -1 and row_list[receipt_photo_idx]:
-            file_id = row_list[receipt_photo_idx]
+        # Process receipt files
+        if row_list[receipt_idx]:
             try:
-                file_info = await bot.get_file(file_id)
-                row_list[receipt_photo_idx] = f"{telegram_file_url_prefix}{file_info.file_path}"
-            except Exception:
-                row_list[receipt_photo_idx] = f"Не удалось получить ссылку: {file_id}"  # Обработка ошибок
+                file_ids = json.loads(row_list[receipt_idx])
+                urls = []
+                for file_id in file_ids:
+                    try:
+                        file_info = await bot.get_file(file_id)
+                        urls.append(f"{telegram_file_url_prefix}{file_info.file_path}")
+                    except Exception:
+                        urls.append(f"Invalid_file_id: {file_id}")
+                row_list[receipt_idx] = "\n".join(urls)  # Join URLs with newline
+            except (json.JSONDecodeError, TypeError):
+                row_list[receipt_idx] = "Invalid JSON data"
 
-        processed_data.append(tuple(row_list))  # Добавляем обработанную строку обратно как кортеж
+        processed_data.append(tuple(row_list))
 
-    # Изменяем названия столбцов для вывода в CSV
-    display_column_names = [col for col in column_names]
-    if collection_photo_idx != -1:
-        display_column_names[collection_photo_idx] = "collection_photo_url"
-    if receipt_photo_idx != -1:
-        display_column_names[receipt_photo_idx] = "receipt_photo_url"
+    display_column_names = list(column_names)
+    display_column_names[collection_idx] = "collection_photo_urls"
+    display_column_names[receipt_idx] = "receipt_file_urls"
 
-    # Теперь генерируем CSV в отдельном потоке
-    # (Эта функция должна быть синхронной, так как она вызывается через asyncio.to_thread)
+    # Using synchronous function in thread for CSV generation
     def _generate_sync_csv():
         output = io.StringIO()
         writer = csv.writer(output)
-
-        writer.writerow(display_column_names)  # Записываем измененные заголовки
-        for row in processed_data:  # Записываем уже обработанные данные
-            writer.writerow(row)
-
+        writer.writerow(display_column_names)
+        writer.writerows(processed_data)
         return output.getvalue().encode('utf-8')
 
     csv_bytes = await asyncio.to_thread(_generate_sync_csv)
-
     return io.BytesIO(csv_bytes)
