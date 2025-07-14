@@ -1,38 +1,30 @@
+# config.py
+
 import os
 from dotenv import load_dotenv
 
-# Загружаем переменные из .env файла
 load_dotenv()
 
-# --- Настройки базы данных ---
-DB_NAME = "promo.db"  # Имя файла базы данных SQLite
-
-# --- Основные настройки бота ---
-# Загрузка токена бота
+DB_NAME = "promo.db"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Загрузка ID администраторов
-raw_admin_ids = os.getenv("ADMIN_IDS", "")
-ADMIN_IDS = [int(admin_id.strip()) for admin_id in raw_admin_ids.split(',')] if raw_admin_ids else []
+raw_main_admin_id = os.getenv("MAIN_ADMIN_ID")
+if raw_main_admin_id and raw_main_admin_id.isdigit():
+    MAIN_ADMIN_ID = int(raw_main_admin_id)
+else:
+    raise ValueError("Ошибка: MAIN_ADMIN_ID должен быть указан в .env файле и быть числом.")
 
-# --- Настройки почты ---
-# Эти переменные загружаются из .env
 SMTP_EMAIL = os.getenv("SMTP_EMAIL")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
+EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER")
+raw_port = os.getenv("EMAIL_SMTP_PORT")
+EMAIL_SMTP_PORT = int(raw_port) if raw_port and raw_port.isdigit() else 587
 
-# ДОБАВЬТЕ ЭТИ ДВЕ СТРОКИ!
-# Они должны быть загружены из .env и затем доступны для импорта из config.py
-EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER") # Убедитесь, что это имя соответствует вашему .env
-EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT")) # Убедитесь, что это имя соответствует вашему .env и что оно int
-
-# --- Настройки файловой системы ---
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "data/uploads")
 
-# Проверка наличия обязательных переменных
-if not BOT_TOKEN or not ADMIN_IDS:
-    raise ValueError("Ошибка: BOT_TOKEN и ADMIN_IDS должны быть указаны в .env файле.")
+if not BOT_TOKEN:
+    raise ValueError("Ошибка: BOT_TOKEN должен быть указан в .env файле.")
 
-# Дополнительная проверка для почты, если вы её используете
-if (SMTP_EMAIL and SMTP_PASSWORD and RECEIVER_EMAIL and EMAIL_SMTP_SERVER and EMAIL_SMTP_PORT) is None:
+if not all([SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL, EMAIL_SMTP_SERVER]):
     print("Предупреждение: Не все настройки SMTP почты указаны в .env, отправка email может не работать.")

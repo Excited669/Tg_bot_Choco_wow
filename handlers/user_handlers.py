@@ -1,12 +1,14 @@
+# handlers/user_handlers.py
+
 import logging
-import asyncio  # <--- ДОБАВЛЕН ИМПОРТ
+import asyncio
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery, ContentType, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 
 from database.database import Database as DB
-from keyboards.inline import get_start_keyboard, get_confirmation_keyboard, get_cancel_keyboard
+from keyboards.inline import get_start_keyboard, get_confirmation_keyboard, get_restart_keyboard
 from keyboards.reply import get_done_keyboard
 from states import SubmissionFSM
 
@@ -15,13 +17,20 @@ logger = logging.getLogger(__name__)
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, db_instance: DB):
     await state.clear()
-    await message.answer(
-        "Привет! 👋 Это бот для конкурса ChocoWow.\n\n"
-        "Чтобы принять участие в розыгрыше призов, нажми кнопку ниже.",
-        reply_markup=get_start_keyboard()
-    )
+    user_exists = await db_instance.check_user_exists(message.from_user.id)
+    if user_exists:
+        await message.answer(
+            "Вы уже отправляли свою заявку. Хотите перезаписать её и отправить данные заново?",
+            reply_markup=get_restart_keyboard()
+        )
+    else:
+        await message.answer(
+            "Привет! 👋 Это бот для конкурса ChocoWow.\n\n"
+            "Чтобы принять участие в розыгрыше призов, нажми кнопку ниже.",
+            reply_markup=get_start_keyboard()
+        )
 
 
 @router.callback_query(F.data == "start_submission")
@@ -44,11 +53,9 @@ async def process_collection_photo(message: Message, state: FSMContext):
     user_data['collection_photos'].append(photo_id)
     await state.update_data(collection_photos=user_data['collection_photos'])
 
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
     sent_message = await message.answer("Фото добавлено. Можете отправить еще или нажать 'Готово'.")
     await asyncio.sleep(3)
     await sent_message.delete()
-    # ----------------------
 
 
 @router.message(SubmissionFSM.uploading_collection, F.text == "Готово")
@@ -81,11 +88,9 @@ async def process_receipt_file(message: Message, state: FSMContext):
     user_data.get('receipt_files', []).append(file_id)
     await state.update_data(receipt_files=user_data.get('receipt_files'))
 
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
     sent_message = await message.answer("Файл добавлен. Можете отправить еще или нажать 'Готово'.")
     await asyncio.sleep(3)
     await sent_message.delete()
-    # ----------------------
 
 
 @router.message(SubmissionFSM.uploading_receipts, F.text == "Готово")
@@ -98,7 +103,8 @@ async def finish_receipts_upload(message: Message, state: FSMContext):
     collection_count = len(user_data.get("collection_photos", []))
     receipt_count = len(user_data.get("receipt_files", []))
 
-    await message.answer("Пожалуйста, подождите...", reply_markup=ReplyKeyboardRemove())
+    wait_message = await message.answer("Пожалуйста, подождите...", reply_markup=ReplyKeyboardRemove())
+
     await message.answer(
         f"<b>Проверьте введенные данные:</b>\n\n"
         f"Фото коллекции: {collection_count} шт.\n"
@@ -106,6 +112,7 @@ async def finish_receipts_upload(message: Message, state: FSMContext):
         f"<b>Все верно?</b>",
         reply_markup=get_confirmation_keyboard()
     )
+    await wait_message.delete()
     await state.set_state(SubmissionFSM.confirmation)
 
 
@@ -136,7 +143,8 @@ async def submission_confirmed(callback: CallbackQuery, state: FSMContext, bot: 
             user_id=user_id,
             username=username,
             collection_photos=user_data["collection_photos"],
-            receipt_files=user_data["receipt_files"]
+            receipt_files=user_data["receipt_files"],
+            db_instance=db_instance
         )
 
     except Exception as e:
@@ -148,33 +156,8 @@ async def submission_confirmed(callback: CallbackQuery, state: FSMContext, bot: 
 
 
 @router.callback_query(SubmissionFSM.confirmation, F.data == "confirm_no")
-async def submission_declined(callback: CallbackQuery, state: FSMContext):
+async def submission_declined(callback: CallbackQuery, state: FSMContext, db_instance: DB):
     await callback.answer("Давайте начнем заново.", show_alert=True)
     await state.clear()
     await callback.message.delete()
-    await cmd_start(callback.message, state)
-
-
-@router.message(StateFilter(SubmissionFSM))
-async def process_invalid_input(message: Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state == SubmissionFSM.uploading_collection:
-        await message.answer("Пожалуйста, отправьте фотографию вашей коллекции или нажмите 'Готово'.")
-    elif current_state == SubmissionFSM.uploading_receipts:
-        await message.answer("Пожалуйста, отправьте фото или PDF файл с чеком, или нажмите 'Готово'.")
-    else:
-        await message.answer("Пожалуйста, следуйте инструкциям на экране.")
-
-
-@router.message(Command("cancel"))
-@router.callback_query(F.data == "cancel_submission")
-async def cancel_handler(update: Message | CallbackQuery, state: FSMContext):
-    await state.clear()
-    message = update if isinstance(update, Message) else update.message
-    await message.answer(
-        "Действие отменено. Вы можете начать заново.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    await cmd_start(message, state)
-    if isinstance(update, CallbackQuery):
-        await update.answer()
+    await cmd_start(callback.message, state, db_instance)
