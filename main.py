@@ -10,7 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import BOT_TOKEN, MAIN_ADMIN_ID
 from database.database import Database
 from handlers import user_handlers, admin_handlers
-from utils.set_bot_commands import set_admin_commands
+from utils.set_bot_commands import set_bot_commands
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -38,7 +38,8 @@ async def main():
     all_admins = await db_instance.get_all_admins()
     if MAIN_ADMIN_ID not in all_admins:
         all_admins.append(MAIN_ADMIN_ID)
-    await set_admin_commands(bot, all_admins)
+
+    await set_bot_commands(bot, all_admins)
     logger.info("Команды для администраторов установлены.")
 
     try:
